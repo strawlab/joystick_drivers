@@ -47,3 +47,5 @@ bison:
   arch: bison
   fedora: bison
   gentoo: sys-devel/bison
+python-cwiid:
+  ubuntu: python-cwiid
