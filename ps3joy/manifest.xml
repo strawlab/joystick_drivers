@@ -14,9 +14,8 @@
   <depend package="diagnostic_msgs"/>
   <depend package="sensor_msgs"/>
   <depend package="rospy"/>
-  <depend package="rosgraph"/>
 
-  <rosdep name="libusb-dev"/>
+  <rosdep name="libusb"/>
   <rosdep name="joystick"/>
   <rosdep name="bluez"/>
   <rosdep name="python-bluez"/>
