@@ -1,3 +1,12 @@
+ADS quickstart
+--------------
+
+1) Pair joystick with sixpair, must be done first time
+2) Run bluetooth listener and push to uinput (python ps3joy.py or rosrun ps3joy ps3joy_node.py)
+3) Run joystick node (rosrun joy joy_node /dev/input/js0)
+
+optional) check messages (rostopic echo joy)
+
 Packages that need to be installed
 ----------------------------------
 joystick
