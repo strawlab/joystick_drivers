@@ -32,9 +32,6 @@
 #*  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 #*  POSSIBILITY OF SUCH DAMAGE.
 #***********************************************************
-import roslib; roslib.load_manifest('ps3joy')
-import rospy
-from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 
 from bluetooth import *
 import select
@@ -45,7 +42,6 @@ import sys
 import traceback
 import subprocess
 from array import array
-import sensor_msgs.msg
 
 L2CAP_PSM_HIDP_CTRL = 17
 L2CAP_PSM_HIDP_INTR = 19
@@ -143,9 +139,9 @@ class BadJoystickException(Exception):
         Exception.__init__(self, "Unsupported joystick.")
 
 class decoder:
-    def __init__(self, deamon, inactivity_timeout = float(1e3000)):
-        #buttons=[uinput.BTN_SELECT, uinput.BTN_THUMBL, uinput.BTN_THUMBR, uinput.BTN_START,
-        #         uinput.BTN_FORWARD, uinput.BTN_RIGHT, uinput.BTN_BACK, uinput.BTN_LEFT,
+    def __init__(self, inactivity_timeout = float(1e3000)):
+        #buttons=[uinput.BTN_SELECT, uinput.BTN_THUMBL, uinput.BTN_THUMBR, uinput.BTN_START, 
+        #         uinput.BTN_FORWARD, uinput.BTN_RIGHT, uinput.BTN_BACK, uinput.BTN_LEFT, 
         #         uinput.BTN_TL, uinput.BTN_TR, uinput.BTN_TL2, uinput.BTN_TR2,
         #         uinput.BTN_X, uinput.BTN_A, uinput.BTN_B, uinput.BTN_Y,
         #         uinput.BTN_MODE]
@@ -172,23 +168,12 @@ class decoder:
         self.fullstop() # Probably useless because of uinput startup bug
         self.outlen = len(buttons) + len(axes)
         self.inactivity_timeout = inactivity_timeout
-        self.deamon = deamon
-        self.init_ros()
+        self.rumble_cmd = [0, 255]
+        self.led_cmd  = 2
+
     step_active = 1
     step_idle = 2
     step_error = 3
-
-    def init_ros(self):
-        try:
-            rospy.init_node('ps3joy',anonymous=True, disable_signals=True)        
-        except:
-            print "rosnode init failed"
-        rospy.Subscriber("joy/set_feedback",sensor_msgs.msg.JoyFeedbackArray,self.set_feedback)
-        self.diagnostics = Diagnostics()
-        self.led_values = [1,0,0,0]
-        self.rumble_cmd = [0, 255]
-        self.led_cmd  = 2
-        self.core_down = False
 
     #********************************************************************************
     #Raw Data Format
@@ -231,7 +216,6 @@ class decoder:
             state_data = all_data[20:23]
             data = all_data[0:20]+all_data[23:]
             prefix = data.pop(0)
-            self.diagnostics.publish(state_data)
             if prefix != 161:
                 print >> sys.stderr, "Unexpected prefix (%i). Is this a PS3 Dual Shock or Six Axis?"%prefix
                 return self.step_error
@@ -314,27 +298,6 @@ class decoder:
                     if len(rawdata) == 0: # Orderly shutdown of socket
                         print "Joystick shut down the connection, battery may be discharged."
                         return
-                    try:
-                        rospy.get_param_names()
-                    except:
-                        print "The roscore or node shutdown, ps3joy shutting down."
-                        return
-                        #for when we can restart a rosnode
-#                        if self.deamon:
-#                            self.core_down= True
-#                        else:
-#                            print "The roscore shutdown, ps3joy shutting down. Run with --deamon if you want ps3joy to respawn"
-#                            return
-#                    if self.core_down == True:
-#                        try:
-#                            rosgraph.masterapi.is_online()
-#                            self.init_ros()
-#                            self.core_down = False
-#                            print "succeeded bringing node up"
-#                        except:
-#                            print "failed to bring node up"
-#                            pass
-
                     stepout = self.step(rawdata)
                     if stepout != self.step_error:
                         lastvalidtime = curtime
@@ -351,62 +314,6 @@ class decoder:
                 time.sleep(0.005) # No need to blaze through the loop when there is an error
         finally:
             self.fullstop()
-
-class Diagnostics():
-    def __init__(self):
-        self.charging_state =  {0:"Charging",
-                                2:"Charging",
-                                3:"Not Charging"}
-        self.connection     =  {18:"USB Connection",
-                                20:"Rumbling",
-                                22:"Bluetooth Connection"}
-        self.battery_state  =  {0:"No Charge",
-                                1:"20% Charge",
-                                2:"40% Charge",
-                                3:"60% Charge",
-                                4:"80% Charge",
-                                5:"100% Charge",
-                                238:"Charging"}
-        self.diag_pub = rospy.Publisher('/diagnostics', DiagnosticArray)
-        self.last_diagnostics_time = rospy.get_rostime()
-
-    def publish(self, state):
-        curr_time = rospy.get_rostime()
-        # limit to 1hz
-        if (curr_time - self.last_diagnostics_time).to_sec() < 1.0:
-            return
-        self.last_diagnostics_time = curr_time
-        diag = DiagnosticArray()
-        diag.header.stamp = curr_time
-        #battery info
-        stat = DiagnosticStatus(name="Battery", level=DiagnosticStatus.OK, message="OK")
-        try:
-            stat.message = self.battery_state[state[1]]
-            if state[1]<3:
-                stat.level = DiagnosticStatus.WARN
-                stat.message = "Please Recharge Battery (%s)."%self.battery_state[state[1]]
-        except KeyError as ex:
-            stat.message = "Invalid Battery State %s"%ex
-            rospy.logwarn("Invalid Battery State %s"%ex)
-        diag.status.append(stat)
-        #battery info
-        stat = DiagnosticStatus(name="Connection", level=DiagnosticStatus.OK, message="OK")
-        try:
-            stat.message = self.connection[state[2]]
-        except KeyError as ex:
-            stat.message = "Invalid Connection State %s"%ex
-            rospy.logwarn("Invalid Connection State %s"%ex)
-        diag.status.append(stat)
-        #battery info
-        stat = DiagnosticStatus(name="Charging State", level=DiagnosticStatus.OK, message="OK")
-        try:
-            stat.message = self.charging_state[state[0]]
-        except KeyError as ex:
-            stat.message = "Invalid Charging State %s"%ex
-            rospy.logwarn("Invalid Charging State %s"%ex)
-        diag.status.append(stat)
-        #publish
-        self.diag_pub.publish(diag)
 
 class Quit(Exception):
     def __init__(self, errorcode):
@@ -498,7 +405,6 @@ class connection_manager:
                 pass
             except KeyboardInterrupt:
                 print "\nCTRL+C detected. Exiting."
-                rospy.signal_shutdown("\nCTRL+C detected. Exiting.")
                 quit(0)
             except Exception, e:
                 traceback.print_exc()
@@ -533,7 +439,6 @@ if __name__ == "__main__":
     try:
         inactivity_timeout = float(1e3000)
         disable_bluetoothd = True
-        deamon = False
         for arg in sys.argv[1:]: # Be very tolerant in case we are roslaunched.
             if arg == "--help":
                 usage(0)
@@ -578,7 +483,7 @@ if __name__ == "__main__":
                 print "No inactivity timeout was set. (Run with --help for details.)"
             else:
                 print "Inactivity timeout set to %.0f seconds."%inactivity_timeout
-            cm = connection_manager(decoder(deamon, inactivity_timeout = inactivity_timeout))
+            cm = connection_manager(decoder(inactivity_timeout = inactivity_timeout))
             cm.listen_bluetooth()
         finally:
             if disable_bluetoothd:
@@ -587,6 +492,5 @@ if __name__ == "__main__":
         errorcode = e.errorcode
     except KeyboardInterrupt:
         print "\nCTRL+C detected. Exiting."
-        rospy.signal_shutdown("\nCTRL+C detected. Exiting.")
     exit(errorcode)
 
